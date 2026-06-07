@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+export const fetchCache = "force-no-store";
+
 export async function GET() {
   const { data, error } = await supabase
     .from("places")
@@ -13,11 +17,33 @@ export async function GET() {
       error.message.toLowerCase().includes("could not find the table");
 
     if (missingTable) {
-      return NextResponse.json({ data: [] });
+      return NextResponse.json(
+        { data: [] },
+        {
+          headers: {
+            "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate"
+          }
+        }
+      );
     }
 
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json(
+      { error: error.message },
+      {
+        status: 500,
+        headers: {
+          "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate"
+        }
+      }
+    );
   }
 
-  return NextResponse.json({ data: data ?? [] });
+  return NextResponse.json(
+    { data: data ?? [] },
+    {
+      headers: {
+        "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate"
+      }
+    }
+  );
 }
