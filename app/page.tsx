@@ -1131,7 +1131,7 @@ function AppHeader({
   action?: "close" | "share";
 }) {
   return (
-    <header className="flex h-[58px] items-center justify-between border-b border-[#f3e8e6] bg-white px-4">
+    <header className="flex h-[58px] items-center justify-between border-b border-[#ecdeda] bg-[#fffaf4] px-4">
       <button
         aria-label={onBack ? "Назад" : "Пустая область"}
         onClick={onBack}
@@ -1139,12 +1139,9 @@ function AppHeader({
       >
         {onBack ? <ChevronLeft size={21} /> : null}
       </button>
-      <div className="text-center">
-        <p className="text-[13px] font-extrabold leading-none">Where To Go</p>
-        <p className="mt-1 text-[9px] font-medium text-[#9c9290]">
-          мини-приложение
-        </p>
-      </div>
+      <p className="text-[24px] font-black uppercase leading-none tracking-[0.005em] text-[#090909]">
+        ПОВОД<span className="text-[#e2343d]">.</span>
+      </p>
       <button
         aria-label={action === "share" ? "Поделиться" : "Закрыть"}
         className="grid size-8 place-items-center text-[#171313]"
@@ -1192,37 +1189,36 @@ function HomeScreen({
 }) {
   return (
     <section>
-      <div className="bg-gradient-to-b from-[#fffaf4] via-[#fff3f0] to-[#fffdfb] px-[22px] pb-5 pt-[30px]">
+      <div className="border-b border-[#ecdeda] bg-[#fffaf4] px-[18px] pb-[18px] pt-[24px]">
         <div className="flex items-center justify-between">
-          <p className="text-[34px] font-black uppercase leading-none tracking-[0.01em] text-[#111]">
+          <p className="text-[29px] font-black uppercase leading-none tracking-[0.005em] text-[#090909]">
             ПОВОД<span className="text-[#e2343d]">.</span>
           </p>
-          <div className="h-10 w-8 rounded-full bg-white/75 blur-[1px]" />
+          <div className="mr-3 h-8 w-6 rounded-full bg-white/80 blur-[1px]" />
         </div>
+      </div>
 
-        <div className="mt-[58px] flex items-start justify-between gap-4">
-          <h1 className="max-w-[245px] flex-1 text-[34px] font-black leading-[1.08] tracking-normal text-[#080808]">
+      <div className="bg-gradient-to-b from-[#fff0ee] via-[#fff7f3] to-[#fffdfb] px-[18px] pb-[22px] pt-[42px]">
+        <div className="flex items-start justify-between gap-2">
+          <h1 className="max-w-[230px] flex-1 text-[29px] font-black leading-[1.12] tracking-normal text-[#050505]">
             Наполняй дни
             <br />
             впечатлениями<span className="text-[#e2343d]">.</span>
           </h1>
-          <div className="shrink-0 pt-1 text-center">
+          <div className="w-[102px] shrink-0 pt-0 text-center">
             <AuthorAvatar />
-            <p className="mt-4 text-[12px] font-black leading-[1.16] text-[#171313]">
+            <p className="mt-[14px] text-[10.5px] font-black leading-[1.15] text-[#171313]">
               Городское медиа
               <br />
-              <span className="font-bold text-[#b78387]">
+              <span className="text-[10.5px] font-bold text-[#b78387]">
                 от Ксюши из Сибири
               </span>
             </p>
           </div>
         </div>
-        <p className="mt-7 text-[14px] font-semibold text-[#6f6663]">
-          Лучшие события и локации Тюмени
-        </p>
       </div>
 
-      <section className="px-[22px] pb-7 pt-0">
+      <section className="px-[18px] pb-[30px] pt-0">
         <HomeCollectionBanner
           collection={featuredCollection}
           isLoading={isLoadingCollection}
@@ -1286,28 +1282,17 @@ function AuthorAvatar() {
 
 function PartnerMaterialBanner() {
   return (
-    <section className="mt-7">
-      <p className="text-[12px] font-black uppercase tracking-[0.12em] text-[#c58c91]">
+    <section className="mt-[24px]">
+      <p className="text-[11px] font-black uppercase tracking-[0.1em] text-[#c58c91]">
         партнерский материал
       </p>
-      <article className="relative mt-4 h-[132px] overflow-hidden rounded-[17px] bg-[#f4eee8] shadow-[0_16px_34px_rgba(64,45,42,0.08)]">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_74%_38%,rgba(147,79,39,0.24),transparent_18%),linear-gradient(105deg,#fffaf5_0%,#f5ece5_43%,#d9b897_100%)]" />
-        <div className="absolute right-4 top-5 size-[84px] rounded-full bg-[#7a3f23]/20 blur-[1px]" />
-        <div className="absolute right-8 top-8 size-[60px] rounded-full border-[10px] border-[#8b5638]/30 bg-[#c98b55]/30" />
-        <div className="relative z-10 flex h-full flex-col justify-center px-5">
-          <h2 className="max-w-[190px] text-[24px] font-black leading-[1.04] text-[#080808]">
-            Летнее меню
-            <br />
-            в кофейне <span className="text-[#e2343d]">N.</span>
-          </h2>
-          <p className="mt-3 text-[13px] font-bold text-[#6f6663]">
-            Новые вкусы уже в меню
-          </p>
-          <span className="mt-4 inline-flex h-9 w-fit items-center gap-3 rounded-[13px] border border-[#171313] px-4 text-[12px] font-extrabold text-[#171313]">
-            Подробнее
-            <ArrowRight size={17} strokeWidth={2.2} />
-          </span>
-        </div>
+      <article className="relative mt-[14px] h-[132px] overflow-hidden rounded-[16px] bg-[#f4eee8] shadow-[0_14px_30px_rgba(64,45,42,0.06)]">
+        <img
+          src="/partner-banner-reference.png"
+          alt="Летнее меню в кофейне N."
+          className="size-full object-cover object-left"
+          loading="lazy"
+        />
       </article>
     </section>
   );
@@ -1325,7 +1310,7 @@ function HomeCollectionBanner({
   onOpenCollection: (collection: Collection) => void;
 }) {
   if (isLoading) {
-    return <div className="h-[228px] animate-pulse rounded-[18px] bg-[#f0e5e1]" />;
+    return <div className="h-[196px] animate-pulse rounded-[16px] bg-[#f0e5e1]" />;
   }
 
   if (error) {
@@ -1339,30 +1324,17 @@ function HomeCollectionBanner({
   return (
     <button
       onClick={() => onOpenCollection(collection)}
-      className="relative h-[228px] w-full overflow-hidden rounded-[18px] bg-[#181211] text-left text-white shadow-[0_20px_44px_rgba(31,20,18,0.18)]"
+      className="relative aspect-[779/411] w-full overflow-hidden rounded-[16px] bg-[#181211] text-left text-white shadow-[0_20px_44px_rgba(31,20,18,0.16)]"
     >
-      <CollectionImage collection={collection} priority />
-      <div className="absolute inset-0 bg-gradient-to-r from-black/78 via-black/42 to-black/8" />
-      <div className="absolute inset-0 bg-gradient-to-t from-black/34 via-transparent to-transparent" />
-
-      <div className="relative z-10 flex h-full max-w-[245px] flex-col justify-between px-6 py-5">
-        <div>
-          <p className="text-[11px] font-extrabold uppercase tracking-[0.16em] text-[#efbdc5]">
-            выбор редакции
-          </p>
-          <h2 className="mt-5 text-[25px] font-extrabold leading-[1.02] tracking-normal">
-            {collection.title}
-          </h2>
-          <p className="mt-3 line-clamp-2 text-[15px] font-semibold leading-[1.35] text-white/88">
-            {collection.description || "Где наслаждаться летом в городе"}
-          </p>
-        </div>
-
-        <span className="inline-flex h-[42px] w-fit items-center gap-3 whitespace-nowrap rounded-[15px] bg-[#f6c6cb] px-5 text-[13px] font-extrabold text-[#171313] shadow-[0_12px_26px_rgba(246,198,203,0.26)]">
-          Смотреть подборку
-          <ArrowRight size={20} strokeWidth={2.2} />
-        </span>
-      </div>
+      <img
+        src="/editorial-banner-reference.png"
+        alt=""
+        className="size-full object-cover"
+        loading="eager"
+      />
+      <span className="sr-only">
+        Открыть подборку {collection.title}
+      </span>
     </button>
   );
 }
