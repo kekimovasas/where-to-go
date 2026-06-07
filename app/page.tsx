@@ -1,7 +1,9 @@
 "use client";
 
 import Image from "next/image";
+import posthog from "posthog-js";
 import {
+  ArrowRight,
   Armchair,
   BriefcaseBusiness,
   CalendarDays,
@@ -22,14 +24,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 
 type Tab = "home" | "events" | "places" | "collections";
-type Category =
-  | "Музыка"
-  | "Гастро"
-  | "Театр"
-  | "Выставки"
-  | "Экскурсии"
-  | "Спорт"
-  | "Лекции";
+type CategoryName = string;
 
 type DateFilter =
   | "Все даты"
@@ -48,7 +43,7 @@ type DateRange = {
 type EventItem = {
   id: string;
   title: string;
-  category: Category;
+  category: CategoryName;
   date: string;
   time: string;
   placeId?: string;
@@ -79,38 +74,37 @@ type PlaceItem = {
   position: string;
 };
 
-type CollectionItem = {
-  id: number;
+type CollectionEntityType = "event" | "place";
+
+type CollectionEntry = {
+  id: string;
+  entityType: CollectionEntityType;
+  entityId: string;
+};
+
+type Collection = {
+  id: string;
   title: string;
-  caption: string;
-  count: string;
+  description: string;
+  coverImage?: string;
+  items: CollectionEntry[];
   tint: string;
   position: string;
 };
 
 type SupabaseEventRow = Record<string, unknown>;
 type SupabasePlaceRow = Record<string, unknown>;
+type SupabaseCategoryRow = Record<string, unknown>;
+type SupabaseCollectionRow = Record<string, unknown>;
+type SupabaseCollectionItemRow = Record<string, unknown>;
 
-const eventCategories: Category[] = [
-  "Музыка",
-  "Гастро",
-  "Театр",
-  "Выставки",
-  "Экскурсии",
-  "Спорт",
-  "Лекции"
-];
-
-const eventCategoryFilters: Array<{ name: Category | "Все"; icon: typeof Music2 }> = [
-  { name: "Все", icon: Sparkles },
-  { name: "Музыка", icon: Music2 },
-  { name: "Гастро", icon: Utensils },
-  { name: "Театр", icon: Drama },
-  { name: "Выставки", icon: GalleryHorizontalEnd },
-  { name: "Экскурсии", icon: Landmark },
-  { name: "Спорт", icon: Armchair },
-  { name: "Лекции", icon: BriefcaseBusiness }
-];
+type CategoryItem = {
+  id: string;
+  name: string;
+  type: string;
+  isActive: boolean;
+  sortOrder: number;
+};
 
 const dateFilters: DateFilter[] = [
   "Все даты",
@@ -122,44 +116,9 @@ const dateFilters: DateFilter[] = [
   "Выбрать даты"
 ];
 
-const collections: CollectionItem[] = [
-  {
-    id: 1,
-    title: "10 лучших летних веранд Тюмени",
-    caption: "Редакция Where To Go",
-    count: "10 мест",
-    tint: "rgba(48, 39, 25, 0.46)",
-    position: "50% 46%"
-  },
-  {
-    id: 2,
-    title: "Куда сходить на свидание",
-    caption: "Маршруты для красивого вечера",
-    count: "8 мест",
-    tint: "rgba(207, 123, 134, 0.34)",
-    position: "48% 30%"
-  },
-  {
-    id: 3,
-    title: "Бесплатные события этой недели",
-    caption: "Выставки, прогулки и лекции",
-    count: "12 событий",
-    tint: "rgba(104, 129, 88, 0.32)",
-    position: "42% 44%"
-  },
-  {
-    id: 4,
-    title: "Что делать в Тюмени в дождь",
-    caption: "Теплые места и спокойные планы",
-    count: "7 идей",
-    tint: "rgba(62, 78, 92, 0.34)",
-    position: "55% 54%"
-  }
-];
-
 export default function HomePage() {
   const [activeTab, setActiveTab] = useState<Tab>("home");
-  const [eventsCategory, setEventsCategory] = useState<Category | "Все">("Все");
+  const [eventsCategory, setEventsCategory] = useState<CategoryName | "Все">("Все");
   const [eventsDateFilter, setEventsDateFilter] = useState<DateFilter>("Все даты");
   const [customDateRange, setCustomDateRange] = useState<DateRange>({
     from: "",
@@ -168,12 +127,19 @@ export default function HomePage() {
   const [placeCategory, setPlaceCategory] = useState<string | "Все">("Все");
   const [selectedEvent, setSelectedEvent] = useState<EventItem | null>(null);
   const [selectedPlace, setSelectedPlace] = useState<PlaceItem | null>(null);
+  const [selectedCollection, setSelectedCollection] = useState<Collection | null>(null);
   const [events, setEvents] = useState<EventItem[]>([]);
   const [isLoadingEvents, setIsLoadingEvents] = useState(true);
   const [eventsError, setEventsError] = useState<string | null>(null);
   const [places, setPlaces] = useState<PlaceItem[]>([]);
   const [isLoadingPlaces, setIsLoadingPlaces] = useState(true);
   const [placesError, setPlacesError] = useState<string | null>(null);
+  const [categories, setCategories] = useState<CategoryItem[]>([]);
+  const [isLoadingCategories, setIsLoadingCategories] = useState(true);
+  const [categoriesError, setCategoriesError] = useState<string | null>(null);
+  const [collections, setCollections] = useState<Collection[]>([]);
+  const [isLoadingCollections, setIsLoadingCollections] = useState(true);
+  const [collectionsError, setCollectionsError] = useState<string | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -203,6 +169,74 @@ export default function HomePage() {
     }
 
     loadEvents();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadCollections() {
+      setIsLoadingCollections(true);
+      setCollectionsError(null);
+
+      const response = await fetch("/api/collections", { cache: "no-store" });
+      const payload = (await response.json()) as {
+        data?: SupabaseCollectionRow[];
+        error?: string;
+      };
+
+      if (!isMounted) {
+        return;
+      }
+
+      if (!response.ok || payload.error) {
+        setCollectionsError(payload.error ?? "Не удалось загрузить подборки");
+        setCollections([]);
+      } else {
+        setCollections((payload.data ?? []).map(mapCollectionRow));
+      }
+
+      setIsLoadingCollections(false);
+    }
+
+    loadCollections();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadCategories() {
+      setIsLoadingCategories(true);
+      setCategoriesError(null);
+
+      const response = await fetch("/api/categories", { cache: "no-store" });
+      const payload = (await response.json()) as {
+        data?: SupabaseCategoryRow[];
+        error?: string;
+      };
+
+      if (!isMounted) {
+        return;
+      }
+
+      if (!response.ok || payload.error) {
+        setCategoriesError(payload.error ?? "Не удалось загрузить категории");
+        setCategories([]);
+      } else {
+        setCategories((payload.data ?? []).map(mapCategoryRow));
+      }
+
+      setIsLoadingCategories(false);
+    }
+
+    loadCategories();
 
     return () => {
       isMounted = false;
@@ -290,10 +324,81 @@ export default function HomePage() {
     );
   }, [placeCategory, places]);
 
+  const eventCategoryFilters = useMemo(() => {
+    return getVisibleCategoryNames(
+      categories,
+      enrichedEvents.map((event) => event.category),
+      "event"
+    );
+  }, [categories, enrichedEvents]);
+
+  const placeCategoryFilters = useMemo(() => {
+    return getVisibleCategoryNames(
+      categories,
+      places.map((place) => place.category),
+      "place"
+    );
+  }, [categories, places]);
+
+  const featuredHomeCollection = useMemo(() => {
+    return collections.find(
+      (collection) => normalizeCategoryName(collection.title) === "5 летних веранд тюмени"
+    ) ?? null;
+  }, [collections]);
+
+  useEffect(() => {
+    if (
+      eventsCategory !== "Все" &&
+      !eventCategoryFilters.includes(eventsCategory)
+    ) {
+      setEventsCategory("Все");
+    }
+  }, [eventCategoryFilters, eventsCategory]);
+
+  useEffect(() => {
+    if (
+      placeCategory !== "Все" &&
+      !placeCategoryFilters.includes(placeCategory)
+    ) {
+      setPlaceCategory("Все");
+    }
+  }, [placeCategory, placeCategoryFilters]);
+
   function openEventsWithDateFilter(filter: DateFilter) {
     setEventsCategory("Все");
     setEventsDateFilter(filter);
     setActiveTab("events");
+  }
+
+  function openEvent(event: EventItem) {
+    posthog.capture("event_open", {
+      event_id: event.id,
+      event_title: event.title,
+      category: event.category,
+      place_id: event.placeId || null,
+      source: activeTab
+    });
+    setSelectedEvent(event);
+  }
+
+  function openPlace(place: PlaceItem) {
+    posthog.capture("place_open", {
+      place_id: place.id,
+      place_title: place.title,
+      category: place.category,
+      source: activeTab
+    });
+    setSelectedPlace(place);
+  }
+
+  function openCollection(collection: Collection) {
+    posthog.capture("collection_open", {
+      collection_id: collection.id,
+      collection_title: collection.title,
+      items_count: collection.items.length,
+      source: activeTab
+    });
+    setSelectedCollection(collection);
   }
 
   if (selectedEvent) {
@@ -335,7 +440,7 @@ export default function HomePage() {
                 place={selectedEventPlace}
                 onOpenPlace={(place) => {
                   setSelectedEvent(null);
-                  setSelectedPlace(place);
+                  openPlace(place);
                 }}
               />
             </div>
@@ -380,7 +485,28 @@ export default function HomePage() {
           events={relatedEvents}
           onOpenEvent={(event) => {
             setSelectedPlace(null);
-            setSelectedEvent(event);
+            openEvent(event);
+          }}
+        />
+      </PhoneShell>
+    );
+  }
+
+  if (selectedCollection) {
+    return (
+      <PhoneShell>
+        <AppHeader onBack={() => setSelectedCollection(null)} action="share" />
+        <CollectionDetailScreen
+          collection={selectedCollection}
+          events={enrichedEvents}
+          places={places}
+          onOpenEvent={(event) => {
+            setSelectedCollection(null);
+            openEvent(event);
+          }}
+          onOpenPlace={(place) => {
+            setSelectedCollection(null);
+            openPlace(place);
           }}
         />
       </PhoneShell>
@@ -398,10 +524,14 @@ export default function HomePage() {
             places={places}
             isLoadingPlaces={isLoadingPlaces}
             placesError={placesError}
+            featuredCollection={featuredHomeCollection}
+            isLoadingCollection={isLoadingCollections}
+            collectionsError={collectionsError}
             isLoading={isLoadingEvents}
             error={eventsError}
-            onOpenEvent={setSelectedEvent}
-            onOpenPlace={setSelectedPlace}
+            onOpenEvent={openEvent}
+            onOpenPlace={openPlace}
+            onOpenCollection={openCollection}
             onSeeTodayEvents={() => openEventsWithDateFilter("Сегодня")}
             onSeeWeekendEvents={() => openEventsWithDateFilter("Выходные")}
             onSeePlaces={() => setActiveTab("places")}
@@ -416,11 +546,14 @@ export default function HomePage() {
             error={eventsError}
             activeCategory={eventsCategory}
             setActiveCategory={setEventsCategory}
+            categories={eventCategoryFilters}
+            isLoadingCategories={isLoadingCategories}
+            categoriesError={categoriesError}
             activeDateFilter={eventsDateFilter}
             setActiveDateFilter={setEventsDateFilter}
             customDateRange={customDateRange}
             setCustomDateRange={setCustomDateRange}
-            onOpenEvent={setSelectedEvent}
+            onOpenEvent={openEvent}
           />
         ) : null}
 
@@ -432,12 +565,20 @@ export default function HomePage() {
             error={placesError}
             activeCategory={placeCategory}
             setActiveCategory={setPlaceCategory}
-            onOpenPlace={setSelectedPlace}
+            categories={placeCategoryFilters}
+            isLoadingCategories={isLoadingCategories}
+            categoriesError={categoriesError}
+            onOpenPlace={openPlace}
           />
         ) : null}
 
         {activeTab === "collections" ? (
-          <CollectionsScreen collections={collections} />
+          <CollectionsScreen
+            collections={collections}
+            isLoading={isLoadingCollections}
+            error={collectionsError}
+            onOpenCollection={openCollection}
+          />
         ) : null}
       </main>
       <BottomNav activeTab={activeTab} onChange={setActiveTab} />
@@ -447,7 +588,7 @@ export default function HomePage() {
 
 function mapEventRow(row: SupabaseEventRow, index: number): EventItem {
   const title = readString(row, ["title", "name", "event_title"], "Без названия");
-  const category = normalizeCategory(readString(row, ["category", "type"], "Музыка"));
+  const category = readString(row, ["category", "type"], "");
   const startsAt = readString(row, ["event_date", "date", "start_date", "starts_at"], "");
 
   return {
@@ -460,13 +601,55 @@ function mapEventRow(row: SupabaseEventRow, index: number): EventItem {
     place: readString(row, ["location"], ""),
     address: "",
     price: readString(row, ["price", "ticket_price"], "Цена уточняется"),
-    tag: readString(row, ["tag", "label"], category.toLowerCase()),
+    tag: readString(row, ["tag", "label"], category ? category.toLowerCase() : "событие"),
     description: readString(row, ["description", "about", "text"], "Описание скоро появится."),
     startsAt,
     tint: pickTint(index),
     position: pickPosition(index),
     imageUrl: normalizeImageUrl(readString(row, ["image_url", "cover_url", "photo_url"], "")),
     ticketUrl: readString(row, ["ticket_url", "more_url"], "")
+  };
+}
+
+function mapCategoryRow(row: SupabaseCategoryRow, index: number): CategoryItem {
+  return {
+    id: readString(row, ["id", "uuid"], String(index)),
+    name: readString(row, ["name", "title", "label", "category"], ""),
+    type: readString(row, ["type", "entity_type", "scope"], ""),
+    isActive: readBoolean(row, ["is_active"], false),
+    sortOrder: readNumber(row, ["sort_order", "position", "order"], index)
+  };
+}
+
+function mapCollectionRow(row: SupabaseCollectionRow, index: number): Collection {
+  const rawItems = row["items"];
+  const items = Array.isArray(rawItems)
+    ? rawItems.map((item, itemIndex) => (
+        mapCollectionItemRow(item as SupabaseCollectionItemRow, itemIndex)
+      ))
+    : [];
+
+  return {
+    id: readString(row, ["id", "uuid"], String(index)),
+    title: readString(row, ["title", "name"], "Подборка без названия"),
+    description: readString(row, ["description", "caption"], ""),
+    coverImage: normalizeImageUrl(readString(row, ["cover_image", "image_url", "cover_url"], "")),
+    items: items.filter((item) => item.entityId && item.entityType),
+    tint: pickTint(index + 2),
+    position: pickPosition(index + 2)
+  };
+}
+
+function mapCollectionItemRow(
+  row: SupabaseCollectionItemRow,
+  index: number
+): CollectionEntry {
+  const entityType = readString(row, ["entity_type"], "");
+
+  return {
+    id: readString(row, ["id", "uuid"], String(index)),
+    entityType: entityType === "event" ? "event" : "place",
+    entityId: readString(row, ["entity_id"], "")
   };
 }
 
@@ -506,12 +689,168 @@ function readString(
   return fallback;
 }
 
-function normalizeCategory(value: string): Category {
-  const category = eventCategories.find(
-    (item) => item.toLowerCase() === value.toLowerCase()
+function readBoolean(
+  row: SupabaseEventRow,
+  keys: string[],
+  fallback: boolean
+): boolean {
+  for (const key of keys) {
+    const value = row[key];
+
+    if (typeof value === "boolean") {
+      return value;
+    }
+
+    if (typeof value === "string") {
+      const normalized = value.trim().toLowerCase();
+
+      if (normalized === "true") {
+        return true;
+      }
+
+      if (normalized === "false") {
+        return false;
+      }
+    }
+  }
+
+  return fallback;
+}
+
+function readNumber(
+  row: SupabaseEventRow,
+  keys: string[],
+  fallback: number
+): number {
+  for (const key of keys) {
+    const value = row[key];
+
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value;
+    }
+
+    if (typeof value === "string" && value.trim().length > 0) {
+      const parsed = Number(value);
+
+      if (Number.isFinite(parsed)) {
+        return parsed;
+      }
+    }
+  }
+
+  return fallback;
+}
+
+function getVisibleCategoryNames(
+  categories: CategoryItem[],
+  usedCategoryNames: string[],
+  type: "event" | "place"
+): string[] {
+  const usedCategories = new Set(
+    usedCategoryNames
+      .map((category) => normalizeCategoryName(category))
+      .filter(Boolean)
   );
 
-  return category ?? "Музыка";
+  const visibleCategories = categories
+    .filter((category) => (
+      category.isActive &&
+      category.name &&
+      (!category.type || normalizeCategoryName(category.type) === type) &&
+      usedCategories.has(normalizeCategoryName(category.name))
+    ))
+    .sort((first, second) => (
+      first.sortOrder - second.sortOrder ||
+      first.name.localeCompare(second.name, "ru")
+    ));
+
+  const uniqueNames = new Set<string>();
+
+  return visibleCategories.reduce<string[]>((result, category) => {
+    const normalized = normalizeCategoryName(category.name);
+
+    if (uniqueNames.has(normalized)) {
+      return result;
+    }
+
+    uniqueNames.add(normalized);
+    result.push(category.name);
+
+    return result;
+  }, []);
+}
+
+function normalizeCategoryName(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+function getCategoryIcon(category: string): typeof Music2 {
+  const normalized = normalizeCategoryName(category);
+
+  if (normalized.includes("музык")) {
+    return Music2;
+  }
+
+  if (normalized.includes("гастро") || normalized.includes("еда")) {
+    return Utensils;
+  }
+
+  if (normalized.includes("театр")) {
+    return Drama;
+  }
+
+  if (normalized.includes("выстав")) {
+    return GalleryHorizontalEnd;
+  }
+
+  if (normalized.includes("экскурс")) {
+    return Landmark;
+  }
+
+  if (normalized.includes("спорт")) {
+    return Armchair;
+  }
+
+  if (normalized.includes("лекц") || normalized.includes("бизнес")) {
+    return BriefcaseBusiness;
+  }
+
+  return Sparkles;
+}
+
+function getResolvedCollectionItems(
+  collection: Collection,
+  events: EventItem[],
+  places: PlaceItem[]
+): Array<
+  | { type: "event"; event: EventItem }
+  | { type: "place"; place: PlaceItem }
+> {
+  const eventsById = new Map(events.map((event) => [event.id, event]));
+  const placesById = new Map(places.map((place) => [place.id, place]));
+
+  return collection.items.reduce<Array<
+    | { type: "event"; event: EventItem }
+    | { type: "place"; place: PlaceItem }
+  >>((result, item) => {
+    if (item.entityType === "event") {
+      const event = eventsById.get(item.entityId);
+
+      if (event) {
+        result.push({ type: "event", event });
+      }
+
+      return result;
+    }
+
+    const place = placesById.get(item.entityId);
+
+    if (place) {
+      result.push({ type: "place", place });
+    }
+
+    return result;
+  }, []);
 }
 
 function parseEventDate(value: string): Date | null {
@@ -769,10 +1108,14 @@ function HomeScreen({
   places,
   isLoadingPlaces,
   placesError,
+  featuredCollection,
+  isLoadingCollection,
+  collectionsError,
   isLoading,
   error,
   onOpenEvent,
   onOpenPlace,
+  onOpenCollection,
   onSeeTodayEvents,
   onSeeWeekendEvents,
   onSeePlaces
@@ -782,51 +1125,49 @@ function HomeScreen({
   places: PlaceItem[];
   isLoadingPlaces: boolean;
   placesError: string | null;
+  featuredCollection: Collection | null;
+  isLoadingCollection: boolean;
+  collectionsError: string | null;
   isLoading: boolean;
   error: string | null;
   onOpenEvent: (event: EventItem) => void;
   onOpenPlace: (place: PlaceItem) => void;
+  onOpenCollection: (collection: Collection) => void;
   onSeeTodayEvents: () => void;
   onSeeWeekendEvents: () => void;
   onSeePlaces: () => void;
 }) {
   return (
     <section>
-      <div className="bg-gradient-to-b from-[#fff0ed] to-[#fffdfb] px-4 pb-5 pt-5">
-        <div className="flex items-start justify-between gap-4">
-          <h1 className="max-w-[210px] text-[30px] font-extrabold leading-[1.05]">
-            Куда сегодня сходим?
+      <div className="bg-gradient-to-b from-[#fff0ed] via-[#fff8f5] to-[#fffdfb] px-4 pb-4 pt-7">
+        <div className="flex items-start justify-between gap-3">
+          <h1 className="max-w-[230px] flex-1 text-[30px] font-extrabold leading-[1.04] tracking-normal text-[#141111]">
+            <span className="block whitespace-nowrap">Куда сегодня</span>
+            <span className="block whitespace-nowrap">сходим?</span>
           </h1>
-          <div className="shrink-0 text-right">
+          <div className="shrink-0 pt-1 text-center">
             <AuthorAvatar />
-            <p className="mt-2 text-[10px] font-bold leading-[1.25] text-[#6e625f]">
+            <p className="mt-3 text-[12px] font-extrabold leading-[1.18] text-[#171313]">
               Городское медиа
               <br />
-              <span className="font-semibold text-[#a88b86]">
+              <span className="font-bold text-[#b78387]">
                 от Ксюши из Сибири
               </span>
             </p>
           </div>
         </div>
-        <p className="mt-2 text-[13px] font-medium text-[#7d7370]">
+        <p className="mt-8 text-[14px] font-medium text-[#6f6663]">
           Лучшие события и локации Тюмени
         </p>
       </div>
 
-      <section className="px-4 pb-6 pt-1">
-        <article className="relative overflow-hidden rounded-lg bg-[#211716] p-5 text-white shadow-[0_18px_42px_rgba(54,34,31,0.16)]">
-          <div className="absolute -right-8 -top-10 size-28 rounded-full bg-[#ec7891]/35" />
-          <div className="absolute bottom-0 right-6 h-16 w-24 rounded-t-full bg-white/10" />
-          <p className="text-[10px] font-bold uppercase text-[#f7c8d1]">
-            место для партнера
-          </p>
-          <h2 className="mt-2 max-w-[230px] text-[18px] font-extrabold leading-tight">
-            Баннер для подборки недели, рекламы или события дня
-          </h2>
-          <p className="mt-2 max-w-[250px] text-[12px] font-medium leading-5 text-white/72">
-            Временный блок в стиле приложения. Позже сюда можно подключить редакционные размещения.
-          </p>
-        </article>
+      <section className="px-4 pb-7 pt-1">
+        <HomeCollectionBanner
+          collection={featuredCollection}
+          isLoading={isLoadingCollection}
+          error={collectionsError}
+          onOpenCollection={onOpenCollection}
+        />
       </section>
 
       <SectionHeader title="Сегодня в Тюмени" action="Смотреть все" onAction={onSeeTodayEvents} />
@@ -863,7 +1204,7 @@ function AuthorAvatar() {
   const [imageFailed, setImageFailed] = useState(false);
 
   return (
-    <div className="ml-auto size-14 rounded-full bg-gradient-to-br from-white via-[#f6d7d1] to-[#e48699] p-[2px] shadow-[0_14px_30px_rgba(49,34,31,0.16)]">
+    <div className="mx-auto size-[78px] rounded-full bg-gradient-to-br from-white via-[#f6d7d1] to-[#e48699] p-[3px] shadow-[0_16px_32px_rgba(49,34,31,0.18)]">
       <div className="grid size-full place-items-center overflow-hidden rounded-full bg-[#171313] text-[17px] font-extrabold text-white">
         {!imageFailed ? (
           <img
@@ -881,6 +1222,60 @@ function AuthorAvatar() {
   );
 }
 
+function HomeCollectionBanner({
+  collection,
+  isLoading,
+  error,
+  onOpenCollection
+}: {
+  collection: Collection | null;
+  isLoading: boolean;
+  error: string | null;
+  onOpenCollection: (collection: Collection) => void;
+}) {
+  if (isLoading) {
+    return <div className="h-[228px] animate-pulse rounded-[18px] bg-[#f0e5e1]" />;
+  }
+
+  if (error) {
+    return <StateMessage text={`Не удалось загрузить подборку: ${error}`} />;
+  }
+
+  if (!collection) {
+    return <StateMessage text="Подборка «5 летних веранд Тюмени» пока не найдена." />;
+  }
+
+  return (
+    <button
+      onClick={() => onOpenCollection(collection)}
+      className="relative h-[228px] w-full overflow-hidden rounded-[18px] bg-[#181211] text-left text-white shadow-[0_20px_44px_rgba(31,20,18,0.18)]"
+    >
+      <CollectionImage collection={collection} priority />
+      <div className="absolute inset-0 bg-gradient-to-r from-black/78 via-black/42 to-black/8" />
+      <div className="absolute inset-0 bg-gradient-to-t from-black/34 via-transparent to-transparent" />
+
+      <div className="relative z-10 flex h-full max-w-[245px] flex-col justify-between px-6 py-5">
+        <div>
+          <p className="text-[11px] font-extrabold uppercase tracking-[0.16em] text-[#efbdc5]">
+            выбор редакции
+          </p>
+          <h2 className="mt-5 text-[25px] font-extrabold leading-[1.02] tracking-normal">
+            {collection.title}
+          </h2>
+          <p className="mt-3 line-clamp-2 text-[15px] font-semibold leading-[1.35] text-white/88">
+            {collection.description || "Где наслаждаться летом в городе"}
+          </p>
+        </div>
+
+        <span className="inline-flex h-[42px] w-fit items-center gap-3 whitespace-nowrap rounded-[15px] bg-[#f6c6cb] px-5 text-[13px] font-extrabold text-[#171313] shadow-[0_12px_26px_rgba(246,198,203,0.26)]">
+          Смотреть подборку
+          <ArrowRight size={20} strokeWidth={2.2} />
+        </span>
+      </div>
+    </button>
+  );
+}
+
 function EventsScreen({
   allEvents,
   events,
@@ -888,6 +1283,9 @@ function EventsScreen({
   error,
   activeCategory,
   setActiveCategory,
+  categories,
+  isLoadingCategories,
+  categoriesError,
   activeDateFilter,
   setActiveDateFilter,
   customDateRange,
@@ -898,8 +1296,11 @@ function EventsScreen({
   events: EventItem[];
   isLoading: boolean;
   error: string | null;
-  activeCategory: Category | "Все";
-  setActiveCategory: (category: Category | "Все") => void;
+  activeCategory: CategoryName | "Все";
+  setActiveCategory: (category: CategoryName | "Все") => void;
+  categories: string[];
+  isLoadingCategories: boolean;
+  categoriesError: string | null;
   activeDateFilter: DateFilter;
   setActiveDateFilter: (filter: DateFilter) => void;
   customDateRange: DateRange;
@@ -924,8 +1325,9 @@ function EventsScreen({
 
       <h2 className="mt-6 text-[17px] font-extrabold">Категории</h2>
       <div className="mini-scroll -mx-4 mt-3 flex gap-2 overflow-x-auto px-4 pb-1">
-        {eventCategoryFilters.map(({ name, icon: Icon }) => {
+        {["Все", ...categories].map((name) => {
           const active = activeCategory === name;
+          const Icon = name === "Все" ? Sparkles : getCategoryIcon(name);
 
           return (
             <button
@@ -943,6 +1345,16 @@ function EventsScreen({
           );
         })}
       </div>
+      {isLoadingCategories ? (
+        <p className="mt-2 text-[11px] font-semibold text-[#9d8f8b]">
+          Загружаем категории...
+        </p>
+      ) : null}
+      {!isLoadingCategories && categoriesError ? (
+        <p className="mt-2 text-[11px] font-semibold text-[#c26b7e]">
+          Категории временно недоступны.
+        </p>
+      ) : null}
 
       <h2 className="mt-5 text-[17px] font-extrabold">Дата</h2>
       <div className="mini-scroll -mx-4 mt-3 flex gap-2 overflow-x-auto px-4 pb-1">
@@ -1029,6 +1441,9 @@ function PlacesScreen({
   error,
   activeCategory,
   setActiveCategory,
+  categories,
+  isLoadingCategories,
+  categoriesError,
   onOpenPlace
 }: {
   places: PlaceItem[];
@@ -1037,14 +1452,17 @@ function PlacesScreen({
   error: string | null;
   activeCategory: string | "Все";
   setActiveCategory: (category: string | "Все") => void;
+  categories: string[];
+  isLoadingCategories: boolean;
+  categoriesError: string | null;
   onOpenPlace: (place: PlaceItem) => void;
 }) {
-  const filters = ["Все", ...Array.from(new Set(allPlaces.map((place) => place.category)))];
+  const filters = ["Все", ...categories];
 
   return (
     <section className="px-4 pb-5 pt-4">
       <SectionTitle title="Локации" />
-      {filters.length > 1 ? (
+      {filters.length > 1 || isLoadingCategories || categoriesError ? (
         <div className="mini-scroll mt-4 flex gap-2 overflow-x-auto pb-2">
           {filters.map((filter) => (
             <button
@@ -1060,6 +1478,16 @@ function PlacesScreen({
             </button>
           ))}
         </div>
+      ) : null}
+      {isLoadingCategories ? (
+        <p className="mt-1 px-1 text-[11px] font-semibold text-[#9d8f8b]">
+          Загружаем категории...
+        </p>
+      ) : null}
+      {!isLoadingCategories && categoriesError ? (
+        <p className="mt-1 px-1 text-[11px] font-semibold text-[#c26b7e]">
+          Категории временно недоступны.
+        </p>
       ) : null}
       <div className="mt-2">
         <PlaceList
@@ -1146,17 +1574,128 @@ function PlaceDetailScreen({
   );
 }
 
-function CollectionsScreen({ collections }: { collections: CollectionItem[] }) {
+function CollectionsScreen({
+  collections,
+  isLoading,
+  error,
+  onOpenCollection
+}: {
+  collections: Collection[];
+  isLoading: boolean;
+  error: string | null;
+  onOpenCollection: (collection: Collection) => void;
+}) {
   return (
     <section className="px-4 pb-5 pt-4">
       <SectionTitle title="Подборки" />
+
+      {isLoading ? (
+        <div className="mt-4 grid gap-3">
+          <WideSkeleton />
+          <WideSkeleton />
+          <WideSkeleton />
+        </div>
+      ) : null}
+
+      {!isLoading && error ? (
+        <div className="mt-4">
+          <StateMessage text={`Не удалось загрузить подборки: ${error}`} />
+        </div>
+      ) : null}
+
+      {!isLoading && !error && collections.length === 0 ? (
+        <div className="mt-4">
+          <StateMessage text="Опубликованных подборок пока нет." />
+        </div>
+      ) : null}
+
       <div className="mt-4 grid gap-3">
-        <LargeCollectionCard collection={collections[0]} />
-        {collections.slice(1).map((collection) => (
-          <CollectionRow key={collection.id} collection={collection} />
+        {!isLoading && !error && collections.map((collection, index) => (
+          index === 0 ? (
+            <LargeCollectionCard
+              key={collection.id}
+              collection={collection}
+              onClick={() => onOpenCollection(collection)}
+            />
+          ) : (
+            <CollectionRow
+              key={collection.id}
+              collection={collection}
+              onClick={() => onOpenCollection(collection)}
+            />
+          )
         ))}
       </div>
     </section>
+  );
+}
+
+function CollectionDetailScreen({
+  collection,
+  events,
+  places,
+  onOpenEvent,
+  onOpenPlace
+}: {
+  collection: Collection;
+  events: EventItem[];
+  places: PlaceItem[];
+  onOpenEvent: (event: EventItem) => void;
+  onOpenPlace: (place: PlaceItem) => void;
+}) {
+  const resolvedItems = getResolvedCollectionItems(collection, events, places);
+
+  return (
+    <main className="mini-scroll h-[calc(100svh-58px)] overflow-y-auto bg-[#fffdfb] pb-8">
+      <section className="relative h-[238px]">
+        <CollectionImage collection={collection} priority />
+        <div className="absolute inset-0 bg-gradient-to-t from-black/72 via-black/18 to-transparent" />
+        <span className="absolute left-4 top-4 rounded-full bg-white/20 px-3 py-1 text-[10px] font-semibold uppercase text-white backdrop-blur">
+          подборка
+        </span>
+        <div className="absolute inset-x-4 bottom-5 text-white">
+          <h1 className="text-[25px] font-extrabold leading-tight">{collection.title}</h1>
+          {collection.description ? (
+            <p className="mt-2 line-clamp-3 text-[12px] font-semibold leading-5 text-white/82">
+              {collection.description}
+            </p>
+          ) : null}
+        </div>
+      </section>
+
+      <section className="px-4 pt-5">
+        <h2 className="text-[17px] font-extrabold text-[#171313]">
+          В подборке
+        </h2>
+        <div className="mt-3 grid grid-cols-2 gap-x-3 gap-y-5">
+          {resolvedItems.map((item) => {
+            if (item.type === "event") {
+              return (
+                <div key={`event-${item.event.id}`} className="col-span-2">
+                  <ListEventCard
+                    event={item.event}
+                    onClick={() => onOpenEvent(item.event)}
+                  />
+                </div>
+              );
+            }
+
+            return (
+              <PlaceCard
+                key={`place-${item.place.id}`}
+                place={item.place}
+                onClick={() => onOpenPlace(item.place)}
+              />
+            );
+          })}
+          {resolvedItems.length === 0 ? (
+            <div className="col-span-2">
+              <StateMessage text="В этой подборке пока нет доступных событий или локаций." />
+            </div>
+          ) : null}
+        </div>
+      </section>
+    </main>
   );
 }
 
@@ -1488,9 +2027,18 @@ function PlaceCard({ place, onClick }: { place: PlaceItem; onClick: () => void }
   );
 }
 
-function LargeCollectionCard({ collection }: { collection: CollectionItem }) {
+function LargeCollectionCard({
+  collection,
+  onClick
+}: {
+  collection: Collection;
+  onClick: () => void;
+}) {
   return (
-    <article className="relative h-[132px] overflow-hidden rounded-lg text-white">
+    <button
+      onClick={onClick}
+      className="relative h-[148px] overflow-hidden rounded-lg text-left text-white shadow-[0_16px_36px_rgba(54,34,31,0.12)]"
+    >
       <CollectionImage collection={collection} />
       <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent" />
       <span className="absolute left-3 top-3 rounded-full bg-white/20 px-2.5 py-1 text-[9px] font-bold uppercase backdrop-blur">
@@ -1499,16 +2047,25 @@ function LargeCollectionCard({ collection }: { collection: CollectionItem }) {
       <div className="absolute inset-x-3 bottom-3">
         <h2 className="text-[18px] font-extrabold leading-tight">{collection.title}</h2>
         <p className="mt-1 text-[11px] font-semibold text-white/82">
-          {collection.caption}
+          {getCollectionCountLabel(collection)}
         </p>
       </div>
-    </article>
+    </button>
   );
 }
 
-function CollectionRow({ collection }: { collection: CollectionItem }) {
+function CollectionRow({
+  collection,
+  onClick
+}: {
+  collection: Collection;
+  onClick: () => void;
+}) {
   return (
-    <article className="grid grid-cols-[76px_1fr] gap-3 rounded-lg bg-white p-2 shadow-[0_10px_24px_rgba(64,45,42,0.06)]">
+    <button
+      onClick={onClick}
+      className="grid grid-cols-[76px_1fr] gap-3 rounded-lg bg-white p-2 text-left shadow-[0_10px_24px_rgba(64,45,42,0.06)]"
+    >
       <div className="relative h-[70px] overflow-hidden rounded-lg">
         <CollectionImage collection={collection} />
       </div>
@@ -1517,26 +2074,65 @@ function CollectionRow({ collection }: { collection: CollectionItem }) {
           {collection.title}
         </h3>
         <p className="mt-2 text-[12px] font-medium text-[#7c726f]">
-          {collection.count}
+          {getCollectionCountLabel(collection)}
         </p>
       </div>
-    </article>
+    </button>
   );
 }
 
-function CollectionImage({ collection }: { collection: CollectionItem }) {
+function CollectionImage({
+  collection,
+  priority = false
+}: {
+  collection: Collection;
+  priority?: boolean;
+}) {
+  if (collection.coverImage) {
+    return (
+      <>
+        <img
+          src={collection.coverImage}
+          alt=""
+          className="absolute inset-0 size-full object-cover"
+          style={{ objectPosition: collection.position }}
+        />
+        <div className="absolute inset-0" style={{ backgroundColor: collection.tint }} />
+      </>
+    );
+  }
+
   return (
     <>
       <Image
         src="/where-to-go-hero.png"
         alt=""
         fill
+        priority={priority}
         className="object-cover"
         style={{ objectPosition: collection.position }}
       />
       <div className="absolute inset-0" style={{ backgroundColor: collection.tint }} />
     </>
   );
+}
+
+function getCollectionCountLabel(collection: Collection): string {
+  const count = collection.items.length;
+
+  if (count === 0) {
+    return "Пока без объектов";
+  }
+
+  if (count === 1) {
+    return "1 объект";
+  }
+
+  if (count > 1 && count < 5) {
+    return `${count} объекта`;
+  }
+
+  return `${count} объектов`;
 }
 
 function InfoRow({

@@ -1,5 +1,24 @@
 create extension if not exists "pgcrypto";
 
+create table if not exists public.categories (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  type text check (type in ('event', 'place')),
+  is_active boolean not null default true,
+  sort_order integer not null default 0,
+  created_at timestamptz not null default now(),
+  unique (type, name)
+);
+
+alter table public.categories enable row level security;
+
+drop policy if exists "Public categories are readable" on public.categories;
+create policy "Public categories are readable"
+on public.categories
+for select
+to anon
+using (is_active = true);
+
 create table if not exists public.places (
   id uuid primary key default gen_random_uuid(),
   title text not null,
@@ -33,6 +52,7 @@ create table if not exists public.collections (
   title text not null,
   description text,
   cover_image text,
+  is_published boolean not null default false,
   created_at timestamptz not null default now()
 );
 
@@ -43,13 +63,14 @@ create policy "Public collections are readable"
 on public.collections
 for select
 to anon
-using (true);
+using (is_published = true);
 
 create table if not exists public.collection_items (
   id uuid primary key default gen_random_uuid(),
   collection_id uuid not null references public.collections(id) on delete cascade,
   entity_type text not null check (entity_type in ('event', 'place')),
   entity_id uuid not null,
+  sort_order integer not null default 0,
   created_at timestamptz not null default now()
 );
 
