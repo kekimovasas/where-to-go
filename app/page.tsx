@@ -515,8 +515,12 @@ export default function HomePage() {
 
   return (
     <PhoneShell>
-      <AppHeader />
-      <main className="mini-scroll h-[calc(100svh-122px)] overflow-y-auto pb-5">
+      {activeTab === "home" ? null : <AppHeader />}
+      <main
+        className={`mini-scroll overflow-y-auto pb-5 ${
+          activeTab === "home" ? "h-[calc(100svh-64px)]" : "h-[calc(100svh-122px)]"
+        }`}
+      >
         {activeTab === "home" ? (
           <HomeScreen
             todayEvents={todayEvents}
@@ -746,42 +750,91 @@ function getVisibleCategoryNames(
   usedCategoryNames: string[],
   type: "event" | "place"
 ): string[] {
-  const usedCategories = new Set(
-    usedCategoryNames
-      .map((category) => normalizeCategoryName(category))
-      .filter(Boolean)
-  );
+  const usedByName = new Map<string, string>();
 
-  const visibleCategories = categories
-    .filter((category) => (
-      category.isActive &&
-      category.name &&
-      (!category.type || normalizeCategoryName(category.type) === type) &&
-      usedCategories.has(normalizeCategoryName(category.name))
-    ))
-    .sort((first, second) => (
-      first.sortOrder - second.sortOrder ||
-      first.name.localeCompare(second.name, "ru")
-    ));
+  for (const categoryName of usedCategoryNames) {
+    const trimmedName = categoryName.trim();
+    const normalizedName = normalizeCategoryName(trimmedName);
 
-  const uniqueNames = new Set<string>();
+    if (trimmedName && !usedByName.has(normalizedName)) {
+      usedByName.set(normalizedName, trimmedName);
+    }
+  }
 
-  return visibleCategories.reduce<string[]>((result, category) => {
-    const normalized = normalizeCategoryName(category.name);
+  const categoryMetaByName = new Map<string, CategoryItem>();
+  const inactiveNames = new Set<string>();
 
-    if (uniqueNames.has(normalized)) {
-      return result;
+  for (const category of categories) {
+    const normalizedName = normalizeCategoryName(category.name);
+
+    if (!normalizedName || !matchesCategoryScope(category.type, type)) {
+      continue;
     }
 
-    uniqueNames.add(normalized);
-    result.push(category.name);
+    if (!category.isActive) {
+      inactiveNames.add(normalizedName);
+      continue;
+    }
 
-    return result;
-  }, []);
+    const currentCategory = categoryMetaByName.get(normalizedName);
+
+    if (
+      !currentCategory ||
+      category.sortOrder < currentCategory.sortOrder
+    ) {
+      categoryMetaByName.set(normalizedName, category);
+    }
+  }
+
+  return Array.from(usedByName.entries())
+    .filter(([normalizedName]) => !inactiveNames.has(normalizedName))
+    .sort(([firstName, firstLabel], [secondName, secondLabel]) => {
+      const firstCategory = categoryMetaByName.get(firstName);
+      const secondCategory = categoryMetaByName.get(secondName);
+
+      if (firstCategory && secondCategory) {
+        return (
+          firstCategory.sortOrder - secondCategory.sortOrder ||
+          firstCategory.name.localeCompare(secondCategory.name, "ru")
+        );
+      }
+
+      if (firstCategory) {
+        return -1;
+      }
+
+      if (secondCategory) {
+        return 1;
+      }
+
+      return firstLabel.localeCompare(secondLabel, "ru");
+    })
+    .map(([normalizedName, fallbackLabel]) => (
+      categoryMetaByName.get(normalizedName)?.name ?? fallbackLabel
+    ));
 }
 
 function normalizeCategoryName(value: string): string {
   return value.trim().toLowerCase();
+}
+
+function matchesCategoryScope(value: string, type: "event" | "place"): boolean {
+  const normalizedType = normalizeCategoryName(value);
+
+  if (!normalizedType) {
+    return true;
+  }
+
+  if (type === "event") {
+    return normalizedType === "event" || normalizedType === "events";
+  }
+
+  return (
+    normalizedType === "place" ||
+    normalizedType === "places" ||
+    normalizedType === "location" ||
+    normalizedType === "locations"
+  );
 }
 
 function getCategoryIcon(category: string): typeof Music2 {
@@ -1139,15 +1192,23 @@ function HomeScreen({
 }) {
   return (
     <section>
-      <div className="bg-gradient-to-b from-[#fff0ed] via-[#fff8f5] to-[#fffdfb] px-4 pb-4 pt-7">
-        <div className="flex items-start justify-between gap-3">
-          <h1 className="max-w-[230px] flex-1 text-[30px] font-extrabold leading-[1.04] tracking-normal text-[#141111]">
-            <span className="block whitespace-nowrap">Куда сегодня</span>
-            <span className="block whitespace-nowrap">сходим?</span>
+      <div className="bg-gradient-to-b from-[#fffaf4] via-[#fff3f0] to-[#fffdfb] px-[22px] pb-5 pt-[30px]">
+        <div className="flex items-center justify-between">
+          <p className="text-[34px] font-black uppercase leading-none tracking-[0.01em] text-[#111]">
+            ПОВОД<span className="text-[#e2343d]">.</span>
+          </p>
+          <div className="h-10 w-8 rounded-full bg-white/75 blur-[1px]" />
+        </div>
+
+        <div className="mt-[58px] flex items-start justify-between gap-4">
+          <h1 className="max-w-[245px] flex-1 text-[34px] font-black leading-[1.08] tracking-normal text-[#080808]">
+            Наполняй дни
+            <br />
+            впечатлениями<span className="text-[#e2343d]">.</span>
           </h1>
           <div className="shrink-0 pt-1 text-center">
             <AuthorAvatar />
-            <p className="mt-3 text-[12px] font-extrabold leading-[1.18] text-[#171313]">
+            <p className="mt-4 text-[12px] font-black leading-[1.16] text-[#171313]">
               Городское медиа
               <br />
               <span className="font-bold text-[#b78387]">
@@ -1156,18 +1217,19 @@ function HomeScreen({
             </p>
           </div>
         </div>
-        <p className="mt-8 text-[14px] font-medium text-[#6f6663]">
+        <p className="mt-7 text-[14px] font-semibold text-[#6f6663]">
           Лучшие события и локации Тюмени
         </p>
       </div>
 
-      <section className="px-4 pb-7 pt-1">
+      <section className="px-[22px] pb-7 pt-0">
         <HomeCollectionBanner
           collection={featuredCollection}
           isLoading={isLoadingCollection}
           error={collectionsError}
           onOpenCollection={onOpenCollection}
         />
+        <PartnerMaterialBanner />
       </section>
 
       <SectionHeader title="Сегодня в Тюмени" action="Смотреть все" onAction={onSeeTodayEvents} />
@@ -1219,6 +1281,35 @@ function AuthorAvatar() {
         )}
       </div>
     </div>
+  );
+}
+
+function PartnerMaterialBanner() {
+  return (
+    <section className="mt-7">
+      <p className="text-[12px] font-black uppercase tracking-[0.12em] text-[#c58c91]">
+        партнерский материал
+      </p>
+      <article className="relative mt-4 h-[132px] overflow-hidden rounded-[17px] bg-[#f4eee8] shadow-[0_16px_34px_rgba(64,45,42,0.08)]">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_74%_38%,rgba(147,79,39,0.24),transparent_18%),linear-gradient(105deg,#fffaf5_0%,#f5ece5_43%,#d9b897_100%)]" />
+        <div className="absolute right-4 top-5 size-[84px] rounded-full bg-[#7a3f23]/20 blur-[1px]" />
+        <div className="absolute right-8 top-8 size-[60px] rounded-full border-[10px] border-[#8b5638]/30 bg-[#c98b55]/30" />
+        <div className="relative z-10 flex h-full flex-col justify-center px-5">
+          <h2 className="max-w-[190px] text-[24px] font-black leading-[1.04] text-[#080808]">
+            Летнее меню
+            <br />
+            в кофейне <span className="text-[#e2343d]">N.</span>
+          </h2>
+          <p className="mt-3 text-[13px] font-bold text-[#6f6663]">
+            Новые вкусы уже в меню
+          </p>
+          <span className="mt-4 inline-flex h-9 w-fit items-center gap-3 rounded-[13px] border border-[#171313] px-4 text-[12px] font-extrabold text-[#171313]">
+            Подробнее
+            <ArrowRight size={17} strokeWidth={2.2} />
+          </span>
+        </div>
+      </article>
+    </section>
   );
 }
 
@@ -1565,7 +1656,7 @@ function PlaceDetailScreen({
               />
             ))}
             {events.length === 0 ? (
-              <StateMessage text="Пока нет связанных событий. Когда в events появится place_id этой локации, они отобразятся здесь." />
+              <StateMessage text="В этой локации пока отсутствуют добавленные мероприятия." />
             ) : null}
           </div>
         </section>
