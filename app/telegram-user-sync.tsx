@@ -24,9 +24,16 @@ declare global {
   }
 }
 
-let userSyncPromise: Promise<void> | null = null;
+let syncInFlight: Promise<void> | null = null;
+let lastSyncStartedAt = 0;
+
+function logSupabaseError(stage: string, error: unknown) {
+  console.error(`[Users] Error during ${stage}:`, error);
+}
 
 async function syncTelegramUser() {
+  console.log("[Users] Sync started");
+
   const telegramWebApp = window.Telegram?.WebApp;
 
   if (!telegramWebApp) {
@@ -45,19 +52,29 @@ async function syncTelegramUser() {
 
   const telegramId = String(telegramUser.id);
   const now = new Date().toISOString();
-  const { data: existingUser, error: selectError } = await supabase
+  console.log(`[Users] Telegram user received: ${telegramId}`);
+
+  const lookupResponse = await supabase
     .from("users")
     .select("telegram_id, total_sessions")
     .eq("telegram_id", telegramId)
     .maybeSingle();
+  const { data: existingUser, error: selectError } = lookupResponse;
+
+  console.log("[Users] Lookup response:", lookupResponse);
+  console.log(
+    `[Users] User found by telegram_id ${telegramId}: ${existingUser ? "yes" : "no"}`
+  );
 
   if (selectError) {
-    console.error(`[Users] Error: ${selectError.message}`);
+    logSupabaseError("user lookup", selectError);
     return;
   }
 
   if (!existingUser) {
-    const { error: insertError } = await supabase
+    console.log(`[Users] Creating user: ${telegramId}`);
+
+    const insertResponse = await supabase
       .from("users")
       .upsert(
         {
@@ -74,10 +91,20 @@ async function syncTelegramUser() {
           utm_campaign: null
         },
         { onConflict: "telegram_id", ignoreDuplicates: false }
-      );
+      )
+      .select("telegram_id, total_sessions, first_seen_at, last_seen_at")
+      .single();
+    const { data: insertedUser, error: insertError } = insertResponse;
+
+    console.log("[Users] Insert/upsert response:", insertResponse);
 
     if (insertError) {
-      console.error(`[Users] Error: ${insertError.message}`);
+      logSupabaseError("user creation", insertError);
+      return;
+    }
+
+    if (!insertedUser) {
+      console.error("[Users] Error: Supabase returned no user after creation");
       return;
     }
 
@@ -86,7 +113,13 @@ async function syncTelegramUser() {
   }
 
   const totalSessions = Number(existingUser.total_sessions ?? 0) + 1;
-  const { error: updateError } = await supabase
+  console.log(`[Users] Updating user: ${telegramId}`, {
+    previous_total_sessions: existingUser.total_sessions,
+    next_total_sessions: totalSessions,
+    next_last_seen_at: now
+  });
+
+  const updateResponse = await supabase
     .from("users")
     .update({
       username: telegramUser.username ?? null,
@@ -95,22 +128,67 @@ async function syncTelegramUser() {
       total_sessions: totalSessions,
       updated_at: now
     })
-    .eq("telegram_id", telegramId);
+    .eq("telegram_id", telegramId)
+    .select("telegram_id, total_sessions, first_seen_at, last_seen_at, updated_at")
+    .maybeSingle();
+  const { data: updatedUser, error: updateError } = updateResponse;
+
+  console.log("[Users] Update response:", updateResponse);
 
   if (updateError) {
-    console.error(`[Users] Error: ${updateError.message}`);
+    logSupabaseError("user update", updateError);
     return;
   }
 
-  console.log(`[Users] User updated: ${telegramId}`);
+  if (!updatedUser) {
+    console.error(
+      "[Users] Error: Supabase update returned no row. Check the UPDATE RLS policy for public.users."
+    );
+    return;
+  }
+
+  console.log(`[Users] User updated: ${telegramId}`, {
+    total_sessions: updatedUser.total_sessions,
+    last_seen_at: updatedUser.last_seen_at
+  });
+}
+
+function runUserSync() {
+  const now = Date.now();
+
+  if (syncInFlight || now - lastSyncStartedAt < 2000) {
+    console.log("[Users] Sync skipped: already running or recently completed");
+    return syncInFlight ?? Promise.resolve();
+  }
+
+  lastSyncStartedAt = now;
+  syncInFlight = syncTelegramUser()
+    .catch((error: unknown) => {
+      logSupabaseError("unexpected sync failure", error);
+    })
+    .finally(() => {
+      syncInFlight = null;
+    });
+
+  return syncInFlight;
 }
 
 export function TelegramUserSync() {
   useEffect(() => {
-    userSyncPromise ??= syncTelegramUser().catch((error: unknown) => {
-      const message = error instanceof Error ? error.message : String(error);
-      console.error(`[Users] Error: ${message}`);
-    });
+    void runUserSync();
+
+    function handleVisibilityChange() {
+      if (document.visibilityState === "visible") {
+        console.log("[Users] Mini App became visible, starting session sync");
+        void runUserSync();
+      }
+    }
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
   }, []);
 
   return null;
