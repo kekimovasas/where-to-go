@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Analytics } from "@vercel/analytics/next";
 import Script from "next/script";
 import { PostHogProvider } from "./providers";
+import { TelegramUserSync } from "./telegram-user-sync";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -25,7 +26,12 @@ export default function RootLayout({
   return (
     <html lang="ru">
       <body>
+        <Script
+          src="https://telegram.org/js/telegram-web-app.js"
+          strategy="beforeInteractive"
+        />
         <PostHogProvider>
+          <TelegramUserSync />
           {children}
           <Analytics />
           <Script id="yandex-metrika" strategy="afterInteractive">
