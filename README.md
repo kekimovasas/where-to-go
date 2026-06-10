@@ -31,15 +31,17 @@ npm run dev
 NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
 NEXT_PUBLIC_POSTHOG_KEY=your-posthog-project-key
-NEXT_PUBLIC_POSTHOG_HOST=https://eu.i.posthog.com
 ```
+
+PostHog traffic is sent through the first-party `/pvd` proxy. The current
+project key belongs to PostHog US Cloud, so the proxy targets
+`us.i.posthog.com` and `us-assets.i.posthog.com`.
 
 Для Vercel добавьте эти же переменные в Project Settings → Environment Variables:
 
 - `NEXT_PUBLIC_SUPABASE_URL`
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
 - `NEXT_PUBLIC_POSTHOG_KEY`
-- `NEXT_PUBLIC_POSTHOG_HOST`
 
 PostHog подключен через клиентский провайдер. Автосбор событий, Session Replay и Heatmaps готовы на стороне приложения; включите нужные продукты в настройках проекта PostHog.
 
