@@ -28,7 +28,8 @@ let syncInFlight: Promise<void> | null = null;
 let lastSyncStartedAt = 0;
 
 function logSupabaseError(stage: string, error: unknown) {
-  console.error(`[Users] Error during ${stage}:`, error);
+  console.error("[Users] Error:", error);
+  console.error(`[Users] Failed stage: ${stage}`);
 }
 
 async function syncTelegramUser() {
@@ -44,6 +45,7 @@ async function syncTelegramUser() {
   telegramWebApp.ready();
 
   const telegramUser = telegramWebApp.initDataUnsafe?.user;
+  console.log("[Users] Telegram user:", telegramUser);
 
   if (!telegramUser) {
     console.error("[Users] Error: Telegram user is unavailable");
@@ -62,6 +64,7 @@ async function syncTelegramUser() {
   const { data: existingUser, error: selectError } = lookupResponse;
 
   console.log("[Users] Lookup response:", lookupResponse);
+  console.log("[Users] Existing user:", existingUser);
   console.log(
     `[Users] User found by telegram_id ${telegramId}: ${existingUser ? "yes" : "no"}`
   );
@@ -113,21 +116,19 @@ async function syncTelegramUser() {
   }
 
   const totalSessions = Number(existingUser.total_sessions ?? 0) + 1;
-  console.log(`[Users] Updating user: ${telegramId}`, {
-    previous_total_sessions: existingUser.total_sessions,
-    next_total_sessions: totalSessions,
-    next_last_seen_at: now
-  });
+  const updatePayload = {
+    username: telegramUser.username ?? null,
+    first_name: telegramUser.first_name ?? null,
+    last_seen_at: now,
+    total_sessions: totalSessions,
+    updated_at: now
+  };
+
+  console.log("[Users] Updating user:", updatePayload);
 
   const updateResponse = await supabase
     .from("users")
-    .update({
-      username: telegramUser.username ?? null,
-      first_name: telegramUser.first_name ?? null,
-      last_seen_at: now,
-      total_sessions: totalSessions,
-      updated_at: now
-    })
+    .update(updatePayload)
     .eq("telegram_id", telegramId)
     .select("telegram_id, total_sessions, first_seen_at, last_seen_at, updated_at")
     .maybeSingle();
@@ -184,10 +185,24 @@ export function TelegramUserSync() {
       }
     }
 
+    function handleWindowFocus() {
+      console.log("[Users] Mini App window focused, starting session sync");
+      void runUserSync();
+    }
+
+    function handlePageShow() {
+      console.log("[Users] Mini App page shown, starting session sync");
+      void runUserSync();
+    }
+
     document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("focus", handleWindowFocus);
+    window.addEventListener("pageshow", handlePageShow);
 
     return () => {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("focus", handleWindowFocus);
+      window.removeEventListener("pageshow", handlePageShow);
     };
   }, []);
 
