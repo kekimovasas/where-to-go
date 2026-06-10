@@ -32,6 +32,10 @@ function logSupabaseError(stage: string, error: unknown) {
   console.error(`[Users] Failed stage: ${stage}`);
 }
 
+function logReturn(reason: string) {
+  console.log(`[Users] Return: ${reason}`);
+}
+
 async function syncTelegramUser() {
   console.log("[Users] Sync started");
 
@@ -39,6 +43,7 @@ async function syncTelegramUser() {
 
   if (!telegramWebApp) {
     console.error("[Users] Error: Telegram Web App is unavailable");
+    logReturn("Telegram Web App is unavailable");
     return;
   }
 
@@ -49,6 +54,7 @@ async function syncTelegramUser() {
 
   if (!telegramUser) {
     console.error("[Users] Error: Telegram user is unavailable");
+    logReturn("Telegram user is unavailable");
     return;
   }
 
@@ -66,11 +72,16 @@ async function syncTelegramUser() {
   console.log("[Users] Lookup response:", lookupResponse);
   console.log("[Users] Existing user:", existingUser);
   console.log(
+    "[Users] Current total_sessions:",
+    existingUser?.total_sessions ?? null
+  );
+  console.log(
     `[Users] User found by telegram_id ${telegramId}: ${existingUser ? "yes" : "no"}`
   );
 
   if (selectError) {
     logSupabaseError("user lookup", selectError);
+    logReturn("user lookup failed");
     return;
   }
 
@@ -103,15 +114,18 @@ async function syncTelegramUser() {
 
     if (insertError) {
       logSupabaseError("user creation", insertError);
+      logReturn("user creation failed");
       return;
     }
 
     if (!insertedUser) {
       console.error("[Users] Error: Supabase returned no user after creation");
+      logReturn("user creation returned no row");
       return;
     }
 
     console.log(`[Users] New user created: ${telegramId}`);
+    logReturn("new user creation completed");
     return;
   }
 
@@ -128,16 +142,25 @@ async function syncTelegramUser() {
 
   const updateResponse = await supabase
     .from("users")
-    .update(updatePayload)
+    .update(updatePayload, { count: "exact" })
     .eq("telegram_id", telegramId)
-    .select("telegram_id, total_sessions, first_seen_at, last_seen_at, updated_at")
-    .maybeSingle();
-  const { data: updatedUser, error: updateError } = updateResponse;
+    .select("telegram_id, total_sessions, first_seen_at, last_seen_at, updated_at");
+  const {
+    data: updatedUsers,
+    error: updateError,
+    count: updatedRowsCount
+  } = updateResponse;
+  const updatedUser = updatedUsers?.[0] ?? null;
 
   console.log("[Users] Update response:", updateResponse);
+  console.log(
+    "[Users] Updated rows count:",
+    updatedRowsCount ?? updatedUsers?.length ?? 0
+  );
 
   if (updateError) {
     logSupabaseError("user update", updateError);
+    logReturn("user update failed");
     return;
   }
 
@@ -145,6 +168,7 @@ async function syncTelegramUser() {
     console.error(
       "[Users] Error: Supabase update returned no row. Check the UPDATE RLS policy for public.users."
     );
+    logReturn("user update affected no visible rows");
     return;
   }
 
@@ -152,6 +176,7 @@ async function syncTelegramUser() {
     total_sessions: updatedUser.total_sessions,
     last_seen_at: updatedUser.last_seen_at
   });
+  logReturn("user update completed");
 }
 
 function runUserSync() {
@@ -159,6 +184,7 @@ function runUserSync() {
 
   if (syncInFlight || now - lastSyncStartedAt < 2000) {
     console.log("[Users] Sync skipped: already running or recently completed");
+    logReturn("sync already running or recently completed");
     return syncInFlight ?? Promise.resolve();
   }
 
@@ -168,9 +194,11 @@ function runUserSync() {
       logSupabaseError("unexpected sync failure", error);
     })
     .finally(() => {
+      console.log("[Users] Sync promise completed");
       syncInFlight = null;
     });
 
+  console.log("[Users] Returning active sync promise");
   return syncInFlight;
 }
 
